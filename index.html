@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KORGI</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+</head>
+
+<style>
+    .logo-img {
+    width: 200px;
+    height: auto;
+    margin-bottom: 10px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    }
+
+    #title, #conversation-title, #history-title {
+    margin-top: 30px;
+    font-weight: bold;
+    }
+
+
+    #conversation-history {
+    text-align: justify;
+    margin-top: 20px;         /* keep some breathing room */         /* optional: nicer reading line length */
+    padding: 10px;
+    margin-left: auto;
+    margin-right: auto;
+    white-space: pre-line;    /* preserve line breaks from \n in JS text */
+    }
+
+    #response-text {
+    text-align: justify;
+    margin-top: 20px;
+    padding: 10px;
+    margin-left: auto;
+    margin-right: auto;
+    border-radius: 5px;
+    color: #333;
+    white-space: pre-line;
+    }
+
+    body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    }
+
+    .container {
+    text-align: center;
+    background-color: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
+    }
+
+    html, body {
+    height: auto;
+    overflow-y: auto;
+    }
+
+
+    h1 {
+        font-size: 2rem;
+        color: #333;
+    }
+
+    .mic-wrapper {
+        margin-top: 20px;
+    }
+
+    .mic-btn {
+        background-color: #008CBA;
+        color: white;
+        font-size: 1.5rem;
+        padding: 15px 30px;
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+        outline: none;
+    }
+
+    .mic-btn:active {
+        background-color: #005f73;
+    }
+
+    #conversation-history {
+        margin-top: 20px;
+        font-size: 1rem;
+        color: #444;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .history-entry {
+        margin-bottom: 10px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background-color: #f9f9f9;
+    }
+
+    .user-input {
+        font-weight: bold;
+        color: #005f73;
+    }
+
+    .ai-response {
+        margin-top: 5px;
+        color: #333;
+    }
+</style>
+
+<body>
+    <div class="container">
+        <img src="/static/android-chrome-512x512.png" alt="Korgi Logo" class="logo-img">
+        <h1 id = "title">KORGI</h1>
+        <div class="mic-wrapper">
+            <button id="start-record-btn" class="mic-btn">🎤︎︎ Click To Chat</button>
+        </div>
+        <h1 id="conversation-title" style="display: none;">CURRENT CONVERSATION</h1>
+        <div id="response-text">
+
+        </div>
+        <h1 id="history-title" style="display: none;">HISTORY</h1>
+        <div id="conversation-history">
+
+        </div>
+    </div>
+</body>
+
+<script>
+    let audioContext;
+    let analyser;
+    let microphone;
+    let volume = 0;
+    let audioStream;
+    let animationId;
+
+    const StartRecordBtn = document.getElementById("start-record-btn");
+    const ResponseText = document.getElementById("response-text");
+    const ConversationHistory = document.getElementById("conversation-history");
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const Recognition = new SpeechRecognition()
+    function startAudioProcessing() {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            audioStream = stream;
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 2048;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            function getVolume() {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                volume = sum / bufferLength; // Average volume
+                updateBackgroundColor(volume);
+                animationId = requestAnimationFrame(getVolume);
+            }
+            getVolume();
+        })
+        .catch(err => console.error('Error accessing microphone:', err));
+    }
+    function stopAudioProcessing() {
+        if (audioStream) {
+            audioStream.getTracks().forEach(track => track.stop());
+            audioStream = null;
+        }
+
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+
+        document.body.style.backgroundColor = ""; // Reset background
+    }
+
+    function updateBackgroundColor(volume) {
+    const greenIntensity = Math.min(255, Math.floor(volume * 5)); // Scale volume to a color intensity
+    document.body.style.backgroundColor = `rgba(144, 238, 144, ${greenIntensity / 255})`; // Light green
+    }
+    Recognition.onstart = function(){
+        ResponseText.innerHTML = "Listening";
+        startAudioProcessing();
+    };
+    Recognition.onspeechend = function(){
+        Recognition.stop();
+    };
+    let lastTranscriptCaptured = false;
+
+    Recognition.onresult = function(event) {
+        const UserInput = event.results[0][0].transcript;
+        lastTranscriptCaptured = true;
+        ResponseText.innerHTML = `USER: "${UserInput}"`;
+        fetch('/process_voice', {
+            method: 'POST',
+            headers: {
+                'Content-type': 'application/json',
+            },
+            body: JSON.stringify({ user_input: UserInput })
+        })
+        .then(response => response.json())
+        .then(data => {
+            const AiResponse = data.response;
+            ResponseText.innerHTML = `BOT: "${AiResponse}"`;
+            UpdateConversationHistory(data.conversation_history);
+            SpeakResponse(AiResponse);
+        })
+        .catch(error => {
+            ResponseText.innerHTML = "Error while processing request.";
+        });
+    };
+
+    Recognition.onend = function () {
+    stopAudioProcessing();
+    document.body.style.backgroundColor = "";
+    // Triggered when recognition stops but no result was captured
+    if (!lastTranscriptCaptured) {
+        const fallbackMessage = "";  // Will be handled as blank in backend
+        fetch('/process_voice', {
+            method: 'POST',
+            headers: {
+                'Content-type': 'application/json',
+            },
+            body: JSON.stringify({ user_input: fallbackMessage })
+        })
+        .then(response => response.json())
+        .then(data => {
+            const AiResponse = data.response;
+            ResponseText.innerHTML = `BOT: "${AiResponse}"`;
+            UpdateConversationHistory(data.conversation_history);
+            SpeakResponse(AiResponse);
+        })
+        .catch(error => {
+            ResponseText.innerHTML = "Error while processing fallback.";
+        });
+    }
+    lastTranscriptCaptured = false;// Reset for next run
+    enableButton();  
+    };
+    let hasIntroduced = false;
+    let isSpeaking = false;
+    const synth = window.speechSynthesis;
+
+    function disableButton() {
+    StartRecordBtn.disabled = true;
+    StartRecordBtn.style.opacity = 0.6;
+    StartRecordBtn.style.cursor = "not-allowed";
+    }  
+
+    function enableButton() {
+    StartRecordBtn.disabled = false;
+    StartRecordBtn.style.opacity = 1;
+    StartRecordBtn.style.cursor = "pointer";
+    }
+
+
+    StartRecordBtn.addEventListener("click", () => {
+    document.getElementById("conversation-title").style.display = "block";
+    // If AI is speaking (not during intro), interrupt
+    if (isSpeaking && !isIntroducing) {
+        synth.cancel();
+        isSpeaking = false;
+        StartRecordBtn.innerText = "🎤︎︎ Click To Chat";
+        return;
+    }
+
+    // If not introduced yet, run intro
+    if (!hasIntroduced) {
+        const introMessage = "Hello! I'm KORGI. Ask me anything!";
+        ResponseText.innerHTML = `BOT: "${introMessage}"`;
+
+        const utterance = new SpeechSynthesisUtterance(introMessage);
+        isSpeaking = true;
+        isIntroducing = true;
+
+        disableButton(); // 🔒 Disable button during intro
+
+        utterance.onend = function () {
+            isSpeaking = false;
+            isIntroducing = false;
+            hasIntroduced = true;
+
+            enableButton(); // ✅ Enable button after intro
+            StartRecordBtn.innerText = "🎤︎︎ Click To Chat";
+            Recognition.start();
+        };
+
+        synth.speak(utterance);
+
+        UpdateConversationHistory([...conversation_history, {
+            USER: "(system)",
+            BOT: introMessage
+        }]);
+        return; // Stop further execution during intro
+    }
+
+    // Normal behavior after intro
+    disableButton();
+    Recognition.start();
+});
+
+
+    function UpdateConversationHistory(history) {
+        ConversationHistory.innerHTML = '';  // Clear existing history
+
+        if (history.length > 0) {
+        document.getElementById("history-title").style.display = "block";
+    }
+
+        history.forEach(entry => {
+            const historyEntry = document.createElement('div');
+            historyEntry.classList.add('history-entry');
+
+            const UserInput = document.createElement('div');
+            UserInput.classList.add('user-input');
+            UserInput.innerHTML = `User: ${entry.USER}`;
+
+            const AiResponse = document.createElement('div');
+            AiResponse.classList.add('ai-response');
+            AiResponse.innerHTML = `BOT: ${entry.BOT}`;
+
+            historyEntry.appendChild(UserInput);
+            historyEntry.appendChild(AiResponse);
+
+            ConversationHistory.appendChild(historyEntry);
+        });
+    }
+
+    // Use the SpeechSynthesis API to speak the AI response
+    function SpeakResponse(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    isSpeaking = true;
+    StartRecordBtn.innerText = "🤫 Click To Shut Up";
+
+    utterance.onend = () => {
+        isSpeaking = false;
+        StartRecordBtn.innerText = "🎤︎︎ Click To Chat";
+        enableButton();
+    };
+
+    synth.speak(utterance);
+    }
+
+</script>
+
+</html>
